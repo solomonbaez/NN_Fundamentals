@@ -1,17 +1,14 @@
 import numpy as np
+import math
 
 # import training data from nnfs
 import nnfs
 from nnfs.datasets import spiral_data
 
-# maintain repeatability
-np.random.seed(0)
-
 nnfs.init()
 
-# best practice in ML denotes input features by an X
-# in this case, the data is not normalized or scaled
-X, y = spiral_data(100, 3)
+# initialize training dataset
+X, y = spiral_data(samples=100, classes=3)
 
 # generally, you will either construct or load a model
 # initial values should be generally be nonzero between (-1, 1)
@@ -26,15 +23,38 @@ class Layer_D:
         # perform the output calculation and store
         self.output = np.dot(inputs, self.weights) + self.biases
 
-# rectified linear unit activation function
+
+# Rectified Linear Unit activation function
 class ReLU:
     def forward(self, inputs):
         self.output = np.maximum(0, inputs)
 
+# SoftMax activation function
+class SoftMax:
+    def forward(self, inputs):
+        # exponential function application and normalization by the maximum input
+        exponentials = np.exp(inputs - np.max(inputs, axis=1, keepdims=True))
+        # normalization per softmax methodology
+        self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
+
+
 # construct the primary layer to process input data
-layer_1 = Layer_D(2, 5)
+layer_1 = Layer_D(2, 3)
 layer_1.forward(X)
 
-# layer activation using the ReLU model
+# layer activation using the ReLU method
 activation1 = ReLU()
 activation1.forward(layer_1.output)
+
+# second layer, three classes
+layer_2 = Layer_D(3, 3)
+layer_2.forward(activation1.output)
+
+# second layer activation using the SoftMax method
+activation2 = SoftMax()
+activation2.forward(layer_2.output)
+
+# probability distribution values are consistent at approximately 0.33
+# expected due to the random initialization of the model
+print(activation2.output)
+
