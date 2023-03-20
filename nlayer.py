@@ -53,6 +53,7 @@ class SoftMax:
         # normalization per softmax methodology
         self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
 
+    # backpropogation step, obsolete due to CombinedBP class
     def backward(self, dvalues):
         # create an uninitialized array to store sample-wise gradients
         self.dinputs = np.empty_like(dvalues)
@@ -68,7 +69,7 @@ class SoftMax:
             # generate the array of sample-wise gradients
             self.dinputs[i] = np.dot(jacobian, dvalue)
 
-# Categorical Cross Entropy function, conceptual implementation
+# Categorical Cross Entropy function
 class CCE:
     def forward(self, inputs, targets):
         samples = len(inputs)
@@ -86,6 +87,7 @@ class CCE:
         loss = -np.log(confidences)
         return np.mean(loss)
 
+    # backpropogation step, obsolete due to CombinedBP class
     def backward(self, dvalues, targets):
         samples = len(dvalues)
 
@@ -102,6 +104,31 @@ class CCE:
         # normalize by sample size
         self.dinputs = (-targets/dvalues)/samples
 
+# combined SoftMax and CCE backpropogation class
+class CombinedBP:
+    def __init__(self):
+        self.softmax = SoftMax()
+        self.cce = CCE()
+
+    # the forward method will calculate the SoftMax and CCE
+    def forward(self, inputs, targets):
+        self.softmax.forward(inputs)
+        # return the loss for variable storage
+        return self.cce.forward(self.softmax.output, targets)
+
+    # the backward method will backpropogate the SoftMax and CCE
+    def backward(self, dvalues, targets):
+        samples = len(dvalues)
+
+        # discretize one-hot encoded targets
+        if len(targets.shape) == 2:
+            targets = np.argmax(targets, axis=1)
+
+        self.dinputs = dvalues.copy()
+        # calculate backward pass gradient
+        self.dinputs[range(samples), targets] -= 1
+        # normalize gradient
+        self.dinputs /= samples
 
 # construct the primary layer to process input data
 layer_1 = DeepLayer(2, 3)
@@ -126,6 +153,11 @@ activation2.forward(layer_2.output)
 cce = CCE()
 loss = cce.forward(activation2.output, y)
 
-print(loss)
+# combined SoftMax and CCE backpropogation
+cbp = CombinedBP()
+cbp.backward(activation2.output, y)
+
+# display the combined SoftMax and CCE gradients
+print(cbp.dinputs)
 
 
