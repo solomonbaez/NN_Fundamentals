@@ -25,12 +25,12 @@ class DeepLayer:
         self.output = np.dot(inputs, self.weights) + self.biases
 
     def backward(self, dvalues):
-        # Backpropogation gradient production
-        # Weight gradient component
+        # backpropogation gradient production
+        # weight gradient component
         self.dweights = np.dot(self.inputs.T, dvalues)
-        # Bias gradient component
+        # bias gradient component
         self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
-        # Input gradient component
+        # input gradient component
         self.dinputs = np.dot(dvalues, self.weights.T)
 
 # Rectified Linear Unit activation function
@@ -40,9 +40,9 @@ class ReLU:
         self.output = np.maximum(0, inputs)
 
     def backward(self, dvalues):
-        # Copy the input gradient values and structure
+        # copy the input gradient values and structure
         self.dinputs = dvalues.copy()
-        # Produce a zero gradient where input values were invalid
+        # produce a zero gradient where input values were invalid
         self.dinputs[self.inputs <= 0] = 0
 
 # SoftMax activation function
@@ -53,9 +53,24 @@ class SoftMax:
         # normalization per softmax methodology
         self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
 
+    def backward(self, dvalues):
+        # create an uninitialized array to store sample-wise gradients
+        self.dinputs = np.empty_like(dvalues)
+
+        # enumerate outputs and gradients
+        for i, (output, dvalue) in enumerate(zip(self.output, dvalues)):
+            # flatten the output array
+            output = np.array(self.output).reshape(-1, 1)
+            # calculate partial derivatives
+            # diagflat produces a diagonal array of output values
+            jacobian = np.diagflat(output) - np.dot(output, output.T)
+
+            # generate the array of sample-wise gradients
+            self.dinputs[i] = np.dot(jacobian, dvalue)
+
 # Categorical Cross Entropy function, conceptual implementation
 class CCE:
-    def calculate(self, inputs, targets):
+    def forward(self, inputs, targets):
         samples = len(inputs)
 
         # prevent zero induced process death
@@ -70,6 +85,23 @@ class CCE:
         # calculate and return CCE
         loss = -np.log(confidences)
         return np.mean(loss)
+
+    def backward(self, dvalues, targets):
+        samples = len(dvalues)
+
+        # collect labels from the first sample vector
+        labels = len(dvalues[0])
+
+        # check if labels are sparse
+        if len(targets.shape) == 1:
+            # one-hot vectorize the targets
+            # (target values on the diagonal, zeroes elsewhere)
+            targets = np.eye(labels)[targets]
+
+        # calculate the gradient via the partial derivative of CCE
+        # normalize by sample size
+        self.dinputs = (-targets/dvalues)/samples
+
 
 # construct the primary layer to process input data
 layer_1 = DeepLayer(2, 3)
@@ -92,7 +124,7 @@ activation2.forward(layer_2.output)
 # Categorical Cross Entropy loss calculation
 # SoftMax processed data is passed as the input, y as the target
 cce = CCE()
-loss = cce.calculate(activation2.output, y)
+loss = cce.forward(activation2.output, y)
 
 print(loss)
 
