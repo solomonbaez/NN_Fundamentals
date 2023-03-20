@@ -1,5 +1,5 @@
 import numpy as np
-import math
+import matplotlib.pyplot as plt
 
 # import training data from nnfs
 import nnfs
@@ -21,13 +21,29 @@ class DeepLayer:
 
     def forward(self, inputs):
         # perform the output calculation and store
+        self.inputs = inputs
         self.output = np.dot(inputs, self.weights) + self.biases
 
+    def backward(self, dvalues):
+        # Backpropogation gradient production
+        # Weight gradient component
+        self.dweights = np.dot(self.inputs.T, dvalues)
+        # Bias gradient component
+        self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+        # Input gradient component
+        self.dinputs = np.dot(dvalues, self.weights.T)
 
 # Rectified Linear Unit activation function
 class ReLU:
     def forward(self, inputs):
+        self.inputs = inputs
         self.output = np.maximum(0, inputs)
+
+    def backward(self, dvalues):
+        # Copy the input gradient values and structure
+        self.dinputs = dvalues.copy()
+        # Produce a zero gradient where input values were invalid
+        self.dinputs[self.inputs <= 0] = 0
 
 # SoftMax activation function
 class SoftMax:
