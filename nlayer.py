@@ -15,7 +15,7 @@ X, y = spiral_data(samples=100, classes=3)
 class DeepLayer:
     def __init__(self, n_in, n_neurons):
         # init input size by matrix size, no transposition
-        self.weights = 0.1*np.random.randn(n_in, n_neurons)
+        self.weights = 0.01 * np.random.randn(n_in, n_neurons)
         # requires a tuple of the shape
         self.biases = np.zeros((1, n_neurons))
 
@@ -48,6 +48,8 @@ class ReLU:
 # SoftMax activation function
 class SoftMax:
     def forward(self, inputs):
+        self.inputs = inputs
+
         # exponential function application and normalization by the maximum input
         exponentials = np.exp(inputs - np.max(inputs, axis=1, keepdims=True))
         # normalization per softmax methodology
@@ -69,21 +71,22 @@ class SoftMax:
             # generate the array of sample-wise gradients
             self.dinputs[i] = np.dot(jacobian, dvalue)
 
-# Categorical Cross Entropy function
-class CCE:
+# Categorical Cross Entropy loss function
+class LossCCE:
+    # SoftMax processed data is passed as the input, y as the target
     def forward(self, inputs, targets):
         samples = len(inputs)
 
-        # prevent zero induced process death
-        clipped_targets = np.clip(inputs, 1e-7, 1-1e-7)
+        # prevent /0 process death
+        clipped_inputs = np.clip(inputs, 1e-7, 1 - 1e-7)
 
         # ensure processing of both scalar and one-hot encoded inputs
         if len(targets.shape) == 1:
-            confidences = clipped_targets[range(samples), targets]
+            confidences = clipped_inputs[range(samples), targets]
         elif len(targets.shape) == 2:
-            confidences = np.sum(clipped_targets*targets, axis=1)
+            confidences = np.sum(clipped_inputs * targets, axis=1)
 
-        # calculate and return CCE
+        # calculate and return CCE data loss
         loss = -np.log(confidences)
         return np.mean(loss)
 
@@ -107,14 +110,15 @@ class CCE:
 # combined SoftMax and CCE backpropogation class
 class CombinedBP:
     def __init__(self):
-        self.softmax = SoftMax()
-        self.cce = CCE()
+        self.activation = SoftMax()
+        self.loss = LossCCE()
 
     # the forward method will calculate the SoftMax and CCE
     def forward(self, inputs, targets):
-        self.softmax.forward(inputs)
+        self.activation.forward(inputs)
+        self.output = self.activation.output
         # return the loss for variable storage
-        return self.cce.forward(self.softmax.output, targets)
+        return self.loss.forward(self.output, targets)
 
     # the backward method will backpropogate the SoftMax and CCE
     def backward(self, dvalues, targets):
@@ -130,34 +134,68 @@ class CombinedBP:
         # normalize gradient
         self.dinputs /= samples
 
-# construct the primary layer to process input data
-layer_1 = DeepLayer(2, 3)
-layer_1.forward(X)
+# SGD optimizer
+class OptimizerSGD:
 
-# layer activation using the ReLU method
+    # initialize optimizer
+    # learning rate set to 1.0 as default
+    def __init__(self, learning_rate=1.0):
+        self.lr = learning_rate
+
+    # update layer parameters using optimizer settings
+    def update(self, layer):
+        layer.weights += -self.lr * layer.dweights
+        layer.biases += -self.lr * layer.dbiases
+
+# primary layer, 2 input features, 64 outputs
+layer1 = DeepLayer(2, 64)
+
+# primary layer activation using the ReLU method
 activation1 = ReLU()
-activation1.forward(layer_1.output)
 
-# second layer, three classes
-layer_2 = DeepLayer(3, 3)
-layer_2.forward(activation1.output)
+# secondary layer, 64 input features, 3 classes
+layer2 = DeepLayer(64, 3)
 
-# second layer activation using the SoftMax method
-# probability distribution values are consistent at approximately 0.33
-# expected due to the random initialization of the model
-activation2 = SoftMax()
-activation2.forward(layer_2.output)
-
-# Categorical Cross Entropy loss calculation
-# SoftMax processed data is passed as the input, y as the target
-cce = CCE()
-loss = cce.forward(activation2.output, y)
-
-# combined SoftMax and CCE backpropogation
+# SoftMax classifier's combined activation and CCE loss
 cbp = CombinedBP()
-cbp.backward(activation2.output, y)
 
-# display the combined SoftMax and CCE gradients
-print(cbp.dinputs)
+# optimizer initialization
+optimizer = OptimizerSGD(learning_rate=1)
 
+# train the model
+for epoch in range(10001):
+    # forward passes on the first layer/activation pair
+    layer1.forward(X)
+    activation1.forward(layer1.output)
 
+    # forward pass on layer two
+    layer2.forward(activation1.output)
+
+    # activation/loss on layer two
+    activation2 = cbp.forward(layer2.output, y)
+
+    # store activation2 outputs along axis 1
+    predictions = np.argmax(cbp.output, axis=1)
+    # discretize one-hot encoded targets
+    if len(y.shape) == 2:
+        y = np.argmax(y, axis=1)
+
+    # calculate accuracy from activation2 and targets
+    accuracy = np.mean(predictions==y)
+    # report epoch performance
+    if not epoch % 100:
+        print(f"epoch: {epoch}, " +
+              f"accuracy: {accuracy:.4f}, " +
+              f"loss: {activation2:.4f}")
+
+    # backpropogation, starting at the most recent forward pass
+    # combined SoftMax and CCE backwards step implicit to the cbp object
+    cbp.backward(cbp.output, y)
+    # reverse sequential utilization of layer/activation gradients
+    layer2.backward(cbp.dinputs)
+    activation1.backward(layer2.dinputs)
+    layer1.backward(activation1.dinputs)
+
+    # update weights and biases in the model layers
+    optimizer.update(layer1)
+    optimizer.update(layer2)
