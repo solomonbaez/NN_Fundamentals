@@ -1,14 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# import training data from nnfs
+# import and initialize training data from nnfs
 import nnfs
 from nnfs.datasets import spiral_data
-
 nnfs.init()
 
-# initialize training dataset
-X, y = spiral_data(samples=100, classes=3)
 
 # generally, you will either construct or load a model
 # initial values should be generally be nonzero between (-1, 1)
@@ -55,24 +52,18 @@ class SoftMax:
         # normalization per softmax methodology
         self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
 
-    # backpropogation step, obsolete due to CombinedBP class
-    def backward(self, dvalues):
-        # create an uninitialized array to store sample-wise gradients
-        self.dinputs = np.empty_like(dvalues)
+# common loss class
+class Loss:
+    # calculate data and regulazation loss
+    def calculate(self, output, y):
+        sample_losses = self.forward(output, y)
 
-        # enumerate outputs and gradients
-        for i, (output, dvalue) in enumerate(zip(self.output, dvalues)):
-            # flatten the output array
-            output = np.array(self.output).reshape(-1, 1)
-            # calculate partial derivatives
-            # diagflat produces a diagonal array of output values
-            jacobian = np.diagflat(output) - np.dot(output, output.T)
+        # return data loss
+        return np.mean(sample_losses)
 
-            # generate the array of sample-wise gradients
-            self.dinputs[i] = np.dot(jacobian, dvalue)
 
 # Categorical Cross Entropy loss function
-class LossCCE:
+class LossCCE(Loss):
     # SoftMax processed data is passed as the input, y as the target
     def forward(self, inputs, targets):
         samples = len(inputs)
@@ -87,25 +78,9 @@ class LossCCE:
             confidences = np.sum(clipped_inputs * targets, axis=1)
 
         # calculate and return CCE data loss
-        loss = -np.log(confidences)
-        return np.mean(loss)
+        losses = -np.log(confidences)
+        return losses
 
-    # backpropogation step, obsolete due to CombinedBP class
-    def backward(self, dvalues, targets):
-        samples = len(dvalues)
-
-        # collect labels from the first sample vector
-        labels = len(dvalues[0])
-
-        # check if labels are sparse
-        if len(targets.shape) == 1:
-            # one-hot vectorize the targets
-            # (target values on the diagonal, zeroes elsewhere)
-            targets = np.eye(labels)[targets]
-
-        # calculate the gradient via the partial derivative of CCE
-        # normalize by sample size
-        self.dinputs = (-targets/dvalues)/samples
 
 # combined SoftMax and CCE backpropogation class
 class CombinedBP:
@@ -118,7 +93,7 @@ class CombinedBP:
         self.activation.forward(inputs)
         self.output = self.activation.output
         # return the loss for variable storage
-        return self.loss.forward(self.output, targets)
+        return self.loss.calculate(self.output, targets)
 
     # the backward method will backpropogate the SoftMax and CCE
     def backward(self, dvalues, targets):
@@ -139,13 +114,24 @@ class OptimizerSGD:
 
     # initialize optimizer
     # learning rate set to 1.0 as default
-    def __init__(self, learning_rate=1.0):
+    def __init__(self, learning_rate=1.0, decay=0.0):
         self.lr = learning_rate
+        self.current_lr = learning_rate
+        self.decay = decay
+        self.iterations = 0
+
+    # learning rate decay
+    def lr_decay(self, epoch):
+        if self.decay:
+            self.current_lr = self.lr / (1 + self.decay * epoch)
 
     # update layer parameters using optimizer settings
     def update(self, layer):
-        layer.weights += -self.lr * layer.dweights
-        layer.biases += -self.lr * layer.dbiases
+        layer.weights += -self.current_lr * layer.dweights
+        layer.biases += -self.current_lr * layer.dbiases
+
+# create dataset
+X, y = spiral_data(samples=100, classes=3)
 
 # primary layer, 2 input features, 64 outputs
 layer1 = DeepLayer(2, 64)
@@ -160,7 +146,7 @@ layer2 = DeepLayer(64, 3)
 cbp = CombinedBP()
 
 # optimizer initialization
-optimizer = OptimizerSGD(learning_rate=1)
+optimizer = OptimizerSGD(learning_rate=1, decay=1e-3)
 
 # train the model
 for epoch in range(10001):
@@ -185,8 +171,9 @@ for epoch in range(10001):
     # report epoch performance
     if not epoch % 100:
         print(f"epoch: {epoch}, " +
-              f"accuracy: {accuracy:.4f}, " +
-              f"loss: {activation2:.4f}")
+              f"accuracy: {accuracy:.3f}, " +
+              f"loss: {activation2:.3f}, " +
+              f"lr: {optimizer.current_lr}")
 
     # backpropogation, starting at the most recent forward pass
     # combined SoftMax and CCE backwards step implicit to the cbp object
@@ -196,6 +183,8 @@ for epoch in range(10001):
     activation1.backward(layer2.dinputs)
     layer1.backward(activation1.dinputs)
 
+    # decay the learning rate
+    optimizer.lr_decay(epoch)
     # update weights and biases in the model layers
     optimizer.update(layer1)
     optimizer.update(layer2)
