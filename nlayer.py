@@ -113,11 +113,11 @@ class CombinedBP:
 class OptimizerSGD:
 
     # initialize optimizer
-    # learning rate set to 1.0 as default
-    def __init__(self, learning_rate=1.0, decay=0.0):
+    def __init__(self, learning_rate=1.0, decay=0.0, momentum=0.0):
         self.lr = learning_rate
         self.current_lr = learning_rate
         self.decay = decay
+        self.momentum = momentum
         self.iterations = 0
 
     # learning rate decay
@@ -127,8 +127,32 @@ class OptimizerSGD:
 
     # update layer parameters using optimizer settings
     def update(self, layer):
-        layer.weights += -self.current_lr * layer.dweights
-        layer.biases += -self.current_lr * layer.dbiases
+        # determine if momentum is utilized
+        if self.momentum:
+
+            # if absent, create momentum arrays within the layer
+            if not hasattr(layer, 'momentum_w'):
+                layer.momentum_w = np.zeros_like(layer.weights)
+                layer.momentum_b = np.zeros_like(layer.biases)
+
+            # calculate weight updates with momentum
+            update_w = self.momentum * layer.momentum_w \
+                            - self.current_lr * layer.dweights
+            layer.momentum_w = update_w
+
+            # calculate bias updates
+            update_b = self.momentum * layer.momentum_b \
+                            - self.current_lr * layer.dbiases
+            layer.momentum_b = update_b
+
+        # standard SGD, no momentum
+        else:
+            update_w = -self.current_lr * layer.dweights
+            update_b = -self.current_lr * layer.dbiases
+
+        # update weights and biases
+        layer.weights += update_w
+        layer.biases += update_b
 
 # create dataset
 X, y = spiral_data(samples=100, classes=3)
@@ -146,7 +170,7 @@ layer2 = DeepLayer(64, 3)
 cbp = CombinedBP()
 
 # optimizer initialization
-optimizer = OptimizerSGD(learning_rate=1, decay=1e-3)
+optimizer = OptimizerSGD(learning_rate=1, decay=1e-3, momentum=0.8)
 
 # train the model
 for epoch in range(10001):
