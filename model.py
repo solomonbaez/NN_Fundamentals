@@ -17,6 +17,9 @@ layer1 = DeepLayer(2, 64, l2_w=5e-4, l2_b=5e-4)
 # primary layer activation using the ReLU method
 activation1 = ReLU()
 
+# dropout layer
+dropout1 = DropoutLayer(0.1)
+
 # secondary layer, 64 input features, 3 classes
 layer2 = DeepLayer(64, 3)
 
@@ -24,7 +27,7 @@ layer2 = DeepLayer(64, 3)
 cbp = CombinedBP()
 
 # optimizer initialization
-optimizer = OptimizerAdaM(learning_rate=0.05, decay=5e-7)
+optimizer = OptimizerAdaM(learning_rate=0.05, decay=5e-5)
 
 # train the model
 for epoch in range(10001):
@@ -32,8 +35,11 @@ for epoch in range(10001):
     layer1.forward(X)
     activation1.forward(layer1.output)
 
+    # forward pass on the dropout layer
+    dropout1.forward(activation1.output)
+
     # forward pass on layer two
-    layer2.forward(activation1.output)
+    layer2.forward(dropout1.output)
 
     # activation/loss on layer two
     data_loss = cbp.forward(layer2.output, y)
@@ -67,7 +73,8 @@ for epoch in range(10001):
     cbp.backward(cbp.output, y)
     # reverse sequential utilization of layer/activation gradients
     layer2.backward(cbp.dinputs)
-    activation1.backward(layer2.dinputs)
+    dropout1.backward(layer2.dinputs)
+    activation1.backward(dropout1.dinputs)
     layer1.backward(activation1.dinputs)
 
     # decay the learning rate
@@ -93,4 +100,5 @@ if len(y_test.shape) == 2:
 accuracy_valid = np.mean(predictions_valid == y_test)
 
 # report validation statistics
+# utilizing dropout the validation set performs better than the training set
 print(f"validation, accuracy: {accuracy_valid:.3f}, loss: {loss_valid:.3f}")
