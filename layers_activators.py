@@ -96,6 +96,23 @@ class SoftMax:
         # normalization per softmax methodology
         self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
 
+
+# Sigmoid activation function
+# first component for binary logistic regression
+# single neurons can represent two classes
+class Sigmoid:
+    def forward(self, inputs):
+        self.inputs = inputs
+
+        # Sigmoid activation
+        self.output = 1 / (1 + np.exp(-inputs))
+
+    def backward(self, dvalues):
+        # Partial derivative of the sigmoid activation function
+        # s' = s(1 - s)
+        self.dinputs = dvalues * (1 - self.output) * self.output
+
+
 # common loss class
 class Loss:
     # calculate data and regulazation loss
@@ -130,7 +147,7 @@ class LossCCE(Loss):
     def forward(self, inputs, targets):
         samples = len(inputs)
 
-        # prevent /0 process death
+        # prevent /0 process death without impacting the mean
         clipped_inputs = np.clip(inputs, 1e-7, 1 - 1e-7)
 
         # ensure processing of both scalar and one-hot encoded inputs
@@ -142,6 +159,35 @@ class LossCCE(Loss):
         # calculate and return CCE data loss
         losses = -np.log(confidences)
         return losses
+
+
+# Binary Cross-Entropy loss function
+# second component of binary logistic regression
+class BinaryCE(Loss):
+    # class values are either 0 or 1
+    # thus, the incorrect class = 1 - correct class
+    def forward(self, inputs, targets):
+        clipped_inputs = np.clip(inputs, 1e-7, 1 - 1e-7)
+
+        # loss calculated on a single ouput is a vector of losses
+        # sample loss will be the mean of losses from a single sample
+        # sample loss = ((current output)**-1) * sum(loss)
+        sample_losses = -(targets * np.log(clipped_inputs) + (1 - targets)
+                          * np.log(1 - clipped_inputs))
+
+        return np.mean(sample_losses, axis=-1)
+
+    def backward(self, dvalues, targets):
+        samples = len(dvalues)
+        outputs = len(dvalues[0])
+
+        # prevent /0 process death without impacting the mean
+        clipped_dvalues = np.clip(dvalues, 1e-7, 1 - 1e-7)
+
+        # calculate and normalize the gradient
+        self.dinputs = -(targets / clipped_dvalues -
+                         (1 - targets) / (1 - clipped_dvalues)) / outputs
+        self.dinputs = self.dinputs / samples
 
 
 # combined SoftMax and CCE backpropogation class

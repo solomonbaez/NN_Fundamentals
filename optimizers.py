@@ -1,5 +1,6 @@
 import numpy as np
 
+
 # SGD optimizer
 class OptimizerSGD:
 
@@ -45,6 +46,7 @@ class OptimizerSGD:
         layer.weights += update_w
         layer.biases += update_b
 
+
 # Adaptive Gradient optimizer
 class OptimizerADA:
 
@@ -78,6 +80,7 @@ class OptimizerADA:
                          (np.sqrt(layer.cache_w) + self.epsilon)
         layer.biases += -self.current_lr * layer.dbiases / \
                          (np.sqrt(layer.cache_b) + self.epsilon)
+
 
 # Root Mean Square Propogation optimizer
 class OptimizerRMS:
@@ -117,6 +120,7 @@ class OptimizerRMS:
         layer.biases += -self.current_lr * layer.dbiases / \
                          (np.sqrt(layer.cache_b) + self.epsilon)
 
+
 # Root Mean Square Propogation optimizer
 class OptimizerAdaM:
 
@@ -132,9 +136,9 @@ class OptimizerAdaM:
         self.iterations = 0
 
     # learning rate decay
-    def lr_decay(self, epoch):
+    def pre_update(self):
         if self.decay:
-            self.current_lr = self.lr / (1 + self.decay * epoch)
+            self.current_lr = self.lr / (1 + self.decay * self.iterations)
 
     # update layer parameters using optimizer settings
     def update(self, layer):
@@ -175,3 +179,6 @@ class OptimizerAdaM:
                          (np.sqrt(cache_w_corrected) + self.epsilon)
         layer.biases += -self.current_lr * momentum_b_corrected / \
                         (np.sqrt(cache_b_corrected) + self.epsilon)
+
+    def post_update(self):
+        self.iterations += 1

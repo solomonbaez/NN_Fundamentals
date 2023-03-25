@@ -8,8 +8,12 @@ import nnfs
 from nnfs.datasets import spiral_data
 nnfs.init()
 
-# create dataset
-X, y = spiral_data(samples=1000, classes=3)
+# create dataset, set 2 classes for binary logistic regression
+X, y = spiral_data(samples=100, classes=2)
+
+# reshape labels to be a nested list
+# inner list contains 0 or 1
+y = y.reshape(-1, 1)
 
 # primary layer, 2 input features, 64 outputs
 layer1 = DeepLayer(2, 64, l2_w=5e-4, l2_b=5e-4)
@@ -17,17 +21,17 @@ layer1 = DeepLayer(2, 64, l2_w=5e-4, l2_b=5e-4)
 # primary layer activation using the ReLU method
 activation1 = ReLU()
 
-# dropout layer
-dropout1 = DropoutLayer(0.1)
+# secondary layer, 64 input features, 1 class
+layer2 = DeepLayer(64, 1)
 
-# secondary layer, 64 input features, 3 classes
-layer2 = DeepLayer(64, 3)
+# secondary layer activation using the Sigmoid method
+activation2 = Sigmoid()
 
-# SoftMax classifier's combined activation and CCE loss
-cbp = CombinedBP()
+# loss function
+binary_loss = BinaryCE()
 
 # optimizer initialization
-optimizer = OptimizerAdaM(learning_rate=0.05, decay=5e-5)
+optimizer = OptimizerAdaM(decay=5e-7)
 
 # train the model
 for epoch in range(10001):
@@ -35,28 +39,29 @@ for epoch in range(10001):
     layer1.forward(X)
     activation1.forward(layer1.output)
 
-    # forward pass on the dropout layer
-    dropout1.forward(activation1.output)
-
     # forward pass on layer two
-    layer2.forward(dropout1.output)
+    layer2.forward(activation1.output)
+
+    # sigmoid activation
+    activation2.forward(layer2.output)
 
     # activation/loss on layer two
-    data_loss = cbp.forward(layer2.output, y)
+    data_loss = binary_loss.calculate(activation2.output, y)
 
-    regularization_loss = cbp.loss.regularization(layer1) \
-                          + cbp.loss.regularization(layer2)
+    # regularization loss
+    regularization_loss = binary_loss.regularization(layer1) + \
+                          binary_loss.regularization(layer2)
 
+    # overall loss
     loss = data_loss + regularization_loss
 
-    # store activation2 outputs along axis 1
-    predictions = np.argmax(cbp.output, axis=1)
-    # discretize one-hot encoded targets
-    if len(y.shape) == 2:
-        y = np.argmax(y, axis=1)
+    # calculate predictions from a binary mask
+    # mutate into a binary array
+    predictions = (activation2.output > 0.5) * 1
 
-    # calculate accuracy from activation2 and targets
-    accuracy = np.mean(predictions==y)
+    # calculate accuracy
+    accuracy = np.mean(predictions == y)
+
     # report epoch performance
     # generally test loss == training loss on a high performing model
     # 10% difference in loss is indicative of significant issues
@@ -69,34 +74,36 @@ for epoch in range(10001):
               f"lr: {optimizer.current_lr}")
 
     # backpropogation, starting at the most recent forward pass
-    # combined SoftMax and CCE backwards step implicit to the cbp object
-    cbp.backward(cbp.output, y)
     # reverse sequential utilization of layer/activation gradients
-    layer2.backward(cbp.dinputs)
-    dropout1.backward(layer2.dinputs)
-    activation1.backward(dropout1.dinputs)
+    binary_loss.backward(activation2.output, y)
+    activation2.backward(binary_loss.dinputs)
+    layer2.backward(activation2.dinputs)
+    activation1.backward(layer2.dinputs)
     layer1.backward(activation1.dinputs)
 
     # decay the learning rate
-    optimizer.lr_decay(epoch)
+    optimizer.pre_update()
     # update weights and biases in the model layers
     optimizer.update(layer1)
     optimizer.update(layer2)
+    optimizer.post_update()
 
 # Validate the model
 
-X_test, y_test = spiral_data(samples=100, classes=3)
+X_test, y_test = spiral_data(samples=100, classes=2)
+# reshape labels
+y_test = y_test.reshape(-1, 1)
 
 # pass the testing data forward through both model layers
 layer1.forward(X_test)
 activation1.forward(layer1.output)
 layer2.forward(activation1.output)
-loss_valid = cbp.forward(layer2.output, y_test)
+activation2.forward(layer2.output)
+
+loss_valid = binary_loss.calculate(activation2.output, y_test)
 
 # calculate accuracy
-predictions_valid = np.argmax(cbp.output, axis=1)
-if len(y_test.shape) == 2:
-    y_test = np.argmax(y_test, axis=1)
+predictions_valid = (activation2.output > 0.5) * 1
 accuracy_valid = np.mean(predictions_valid == y_test)
 
 # report validation statistics
