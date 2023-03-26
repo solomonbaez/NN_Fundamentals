@@ -3,9 +3,11 @@ import numpy as np
 # generally, you will either construct or load a model
 # initial values should be generally be nonzero between (-1, 1)
 class DeepLayer:
-    def __init__(self, n_in, n_neurons, l1_w=0.0, l2_w=0.0, l1_b=0.0, l2_b=0.0):
+    # weight initializer utilized in weight distribution modification
+    # used when model will not learn in accordance with learning rate adjustments
+    def __init__(self, n_in, n_neurons, init_w=0.01, l1_w=0.0, l2_w=0.0, l1_b=0.0, l2_b=0.0):
         # initialize input size
-        self.weights = 0.01 * np.random.randn(n_in, n_neurons)
+        self.weights = init_w * np.random.randn(n_in, n_neurons)
         self.biases = np.zeros((1, n_neurons))
 
         # regularization strength
@@ -113,6 +115,18 @@ class Sigmoid:
         self.dinputs = dvalues * (1 - self.output) * self.output
 
 
+# Linear activation
+class Linear:
+    # store inputs
+    def forward(self, inputs):
+        self.inputs = inputs
+        self.output = inputs
+
+    def backward(self, dvalues):
+        # linear derivative is 1
+        self.dinputs = dvalues.copy()
+
+
 # common loss class
 class Loss:
     # calculate data and regulazation loss
@@ -175,6 +189,7 @@ class BinaryCE(Loss):
         sample_losses = -(targets * np.log(clipped_inputs) + (1 - targets)
                           * np.log(1 - clipped_inputs))
 
+        # return data loss
         return np.mean(sample_losses, axis=-1)
 
     def backward(self, dvalues, targets):
@@ -189,6 +204,39 @@ class BinaryCE(Loss):
                          (1 - targets) / (1 - clipped_dvalues)) / outputs
         self.dinputs = self.dinputs / samples
 
+
+# Mean Squared Error loss function
+class MSE(Loss):
+    def forward(self, inputs, targets):
+        # calculate mse
+        sample_losses = (targets - inputs) ** 2
+
+        # return data loss
+        return np.mean(sample_losses, axis=-1)
+
+    def backward(self, dvalues, targets):
+        samples = len(dvalues)
+        outputs = len(dvalues[0])
+
+        # calculate and normalize gradient
+        self.dinputs = -2 * (targets - dvalues) / outputs / samples
+
+
+# Mean Absolute Error loss function
+class MAE(Loss):
+    def forward(self, inputs, targets):
+        # calculate mae
+        sample_losses = np.abs(targets - inputs)
+
+        # return data loss
+        return np.mean(sample_losses, axis=-1)
+
+    def backward(self, dvalues, targets):
+        samples = len(dvalues)
+        outputs = len(dvalues[0])
+
+        # calculate and normalize gradient
+        self.dinputs = np.sign(targets - dvalues) / outputs / samples
 
 # combined SoftMax and CCE backpropogation class
 class CombinedBP:
