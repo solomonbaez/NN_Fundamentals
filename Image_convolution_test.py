@@ -9,43 +9,42 @@ from keras.datasets import mnist
 (X, y), (X_valid, y_valid) = mnist.load_data()
 
 # truncate features
-X = X[:10]
+X = X[:100]
+
+X = X.reshape(len(X), 28, 28, 1)
 
 # set the kernel dimensions
-kernel_shape = (3, 3)
+kernel_shape = (3, 3, 1)
 kernel = np.random.randn(*kernel_shape)
 
 # define input dimensions
-x = X[0]
-x_h = x.shape[0]
-x_w = x.shape[1]
+_, x_h, x_w, x_d = X.shape
+k_h, k_w, k_d = kernel.shape
 
-# define kernel dimensions
-k_h = kernel.shape[0]
-k_w = kernel.shape[1]
-
-# define zero-padding
-h, w = k_h // 2, k_w // 2
+# define output dimensions
+out_h = x_h - k_h + 1
+out_w = x_w - k_w + 1
+out_d = k_d
 
 # pre-set output tensor
-out = np.zeros(X.shape)
+out = np.zeros((out_h, out_w, out_d))
+out_array = []
 
 for x in X:
-    for o in out:
-        # correlate the input with the kernel
-        for i in range (h, x_h - h):
-            for j  in range(w, x_w - w):
-                # temporary sum variable
-                tmp = 0
+    for h in range(out_h):
+        for w in range(out_w):
+            for d in range(out_d):
+                # extract image patch
+                sample = x[h:h+k_h, w:w+k_w, :]
 
-                # find correlation at output matrix position [i][j]
-                for m in range (k_h):
-                    for n in range(k_w):
-                        # find dot products along kernel heights and widths
-                        tmp += kernel[m][n]*x[i-h+m][j-w+n]
+                # correlate the sample and kernel
+                corr = sample * kernel[:, :, d]
 
-                # set correlation
-                o[i][j] = tmp
+                # sum the results
+                out[h, w, d] = np.sum(corr)
+    out_array.append(out)
+
+out_array = np.array(out_array)
 
 # # if desired, view input and output tensor samples
 # import matplotlib.pyplot as plt
@@ -55,7 +54,7 @@ for x in X:
 
 
 # verify shape is maintained
-print(X.shape, out.shape)
+print(X.shape, out_array.shape)
 
 
 
