@@ -32,7 +32,7 @@ class ConvLayer:
         self.kernels = np.random.randn(*shape_k)
 
         # initialize dimensions, kernel dimensions must be accessable
-        _, self.h_in, self.w_in, self.d_in = shape_in
+        self.size_batch, self.h_in, self.w_in, self.d_in = shape_in
         self.h_k, self.w_k, self.d_k = self.kernels.shape
 
         # initialize the output tensor
@@ -51,56 +51,58 @@ class ConvLayer:
 
         # loop input features through output tensor dimensions
         for idx, x in enumerate(inputs):
-            # set storage tensor
-            self.out = np.copy(self.biases)
+            out = np.copy(self.biases)
             for h in range(H):
                 for w in range(W):
                     for d in range(D):
                         # extract the current sample
-                        sample = x[h:h+self.h_k, w:w+self.w_k]
+                        sample = x[h:h+self.h_k, w:w+self.w_k, :]
 
-                        # correlate the sample with the kernel
-                        correlation = sample * self. kernels[:, :, d]
+                        # expand sample dimensions for element-wise multiplication
+                        sample = np.expand_dims(sample, axis=-1)
 
-                        self.out[h, w, d] += np.sum(correlation)
-            # store batch-wise output
-            self.output.append(self.out)
+                        correlation = np.sum(sample * self.kernels, axis=(0,1,2))
+
+                        # store outputs
+                        out[h, w, d] += np.sum(correlation)
+            self.output.append(out)
         self.output = np.array(self.output)
 
         # restructure the output
-        self.output = self.output.reshape((100, 26*26))
+        self.output = self.output.reshape((self.size_batch, H*W*D))
 
     def backward(self, inputs, dvalues):
-        self.dvalues = dvalues
+        # reshape input gradient
+        H, W, D = self.shape_out
+        self.dvalues = dvalues.reshape(self.size_batch, H, W, D)
+
+        # initialize output gradients
         self.dinputs = []
-        self.dkernels = []
+        self.dkernels = np.zeros_like(self.kernels)
 
         for idx, x in enumerate(inputs):
-            # print(x.shape, "x shape")
             # initialize gradient tensors
-            dinput = np.zeros_like(inputs[0])
-            dkernel = np.zeros_like(self.kernels)
-            # print(dinput.shape, "dinput shape")
-            # print(dkernel.shape, "dkernel shape")
-                # print(dvalue.shape, "dvalue shape")
-            for h in range(self.h_in - self.h_k + 1):
-                for w in range(self.w_in - self.w_k + 1):
-                    for d in range(self.d_k):
+            dinput = np.zeros_like(x)
+
+            for h in range(H):
+                for w in range(W):
+                    for d in range(D):
                         # extract current sample
                         sample = x[h:h + self.h_k, w:w + self.w_k, :]
-                        # print(sample.shape, "sample shape")
+
                         # calculate the gradient of the loss
-                        sample_out = dvalues[idx, h, w, d]
-                        # print(sample_out, "dvalue sample")
+                        sample_out = self.dvalues[idx, h, w, d]
+
                         # calculate output gradients
                         dinput[h:h + self.h_k, w:w + self.w_k, :] += \
-                            self.kernels[:, :, :] * sample_out
-                        dkernel[:, :, :] += sample * sample_out
+                            self.kernels[:, :, d, np.newaxis] * sample_out
+
+                        self.dkernels[:, :, d, np.newaxis] += sample_out * sample
+
             # store batch-wise gradients
             self.dinputs.append(dinput)
-            self.dkernels.append(dkernel)
+
         self.dinputs = np.array(self.dinputs)
-        self.dkernels = np.array(self.dkernels)
 
 
 # Sigmoid Activation
@@ -197,19 +199,24 @@ X = X.reshape(len(X), 28, 28, 1)
 
 X = X.astype("float32") / 255
 
+print(X.shape, y.shape)
+
 # define primary convolutional layer/activation pair: single 3x3 kernel
 clayer = ConvLayer(shape_in=X.shape, shape_k=(3,3,1))
 s1 = Sigmoid()
 
 # define secondary layer/activation pair
-dlayer = DenseLayer(676, 100)
+h_out, w_out, d_out = clayer.shape_out
+n_in, n_neurons = h_out*w_out*d_out, len(X)
+print(n_in)
+dlayer = DenseLayer(n_in, n_neurons)
 s2 = Sigmoid()
 
 # binary loss
 bloss = BinaryCE()
 
 # optimizer
-optimizer = OptimizerCNN()
+optimizer = OptimizerCNN(learning_rate=2, decay=0)
 
 for epoch in range(1001):
     # forward pass on first layer/activator pair
@@ -220,15 +227,16 @@ for epoch in range(1001):
     dlayer.forward(s1.output)
     s2.forward(dlayer.output)
 
-    # calculate loss and accuracy: CURRENT VALUES INACCinaURATE
+    # calculate loss and accuracy: CURRENT VALUES INACCURATE
     loss = bloss.calculate(s2.output, y)
 
     predictions = (s2.output > 0.5) * 1
     accuracy = np.mean(predictions == y)
 
     # report model performance
-    if not epoch % 100:
+    if not epoch % 10:
         print(f"epoch: {epoch}, " +
+              # f"predictions: {predictions[:10]}, " +
               f"accuracy: {accuracy:.3f}, " +
               f"loss: {loss:.3f}, " +
               f"lr: {optimizer.current_lr}")
@@ -238,9 +246,7 @@ for epoch in range(1001):
     s2.backward(bloss.dinputs)
     dlayer.backward(s2.dinputs)
     s1.backward(dlayer.dinputs)
-    # reshape the primary Sigmoid gradient
-    final_d = s1.dinputs.reshape(100, 26, 26, 1)
-    clayer.backward(X, final_d)
+    clayer.backward(X, s1.dinputs)
 
     # update layers
     optimizer.pre_update()
