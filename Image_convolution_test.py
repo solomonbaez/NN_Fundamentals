@@ -1,6 +1,7 @@
 import numpy as np
 from keras.datasets import mnist
 
+
 # Dense Layer: 2D matrix processing
 class DenseLayer:
     # weight initializer utilized in weight distribution modification
@@ -25,56 +26,50 @@ class DenseLayer:
         self.dinputs = np.dot(dvalues, self.weights.T)
 
 
-# Convolutinal Layer: single kernel functionality
+# Convolutinal Layer
 class ConvLayer:
     def __init__(self, shape_in, shape_k):
-        # initialize the kernel(s)
+        # initialize the kernel
         self.kernels = np.random.randn(*shape_k)
 
-        # initialize dimensions, kernel dimensions must be accessable
-        self.size_batch, self.h_in, self.w_in, self.d_in = shape_in
+        # store batch size and kernel dimensions
+        self.size_batch = shape_in[0]
         self.h_k, self.w_k, self.d_k = self.kernels.shape
 
-        # initialize the output tensor
-        self.shape_out = (self.h_in - self.h_k + 1,
-                          self.w_in - self.w_k + 1,
-                          self.d_k)
+        # initialize output tensor shape
+        self.H = shape_in[1] - self.h_k + 1
+        self.W = shape_in[2] - self.w_k + 1
+        self.D = self.d_k
 
-        self.biases = np.random.randn(*self.shape_out)
+        # initialize the bias tensor
+        self.biases = np.random.randn(self.H, self.W, self.D)
 
     def forward(self, inputs):
-        # define convolution dimensions
-        H, W, D = self.shape_out
-
         # initialize output storage tensor
         self.output = []
 
         # loop input features through output tensor dimensions
         for idx, x in enumerate(inputs):
             out = np.copy(self.biases)
-            for h in range(H):
-                for w in range(W):
-                    for d in range(D):
+            for h in range(self.H):
+                for w in range(self.W):
+                    for d in range(self.D):
                         # extract the current sample
                         sample = x[h:h+self.h_k, w:w+self.w_k, :]
 
-                        # expand sample dimensions for element-wise multiplication
-                        sample = np.expand_dims(sample, axis=-1)
+                        # compute output tensor
+                        out[h, w, d] = np.sum(sample*self.kernels)
 
-                        correlation = np.sum(sample * self.kernels, axis=(0,1,2))
-
-                        # store outputs
-                        out[h, w, d] += np.sum(correlation)
+            # store output tensor
             self.output.append(out)
-        self.output = np.array(self.output)
 
         # restructure the output
-        self.output = self.output.reshape((self.size_batch, H*W*D))
+        self.output = np.array(self.output)
+        self.output = self.output.reshape((self.size_batch, self.H * self.W * self.D))
 
     def backward(self, inputs, dvalues):
         # reshape input gradient
-        H, W, D = self.shape_out
-        self.dvalues = dvalues.reshape(self.size_batch, H, W, D)
+        self.dvalues = dvalues.reshape(self.size_batch, self.H, self.W, self.D)
 
         # initialize output gradients
         self.dinputs = []
@@ -84,9 +79,9 @@ class ConvLayer:
             # initialize gradient tensors
             dinput = np.zeros_like(x)
 
-            for h in range(H):
-                for w in range(W):
-                    for d in range(D):
+            for h in range(self.H):
+                for w in range(self.W):
+                    for d in range(self.D):
                         # extract current sample
                         sample = x[h:h + self.h_k, w:w + self.w_k, :]
 
@@ -102,25 +97,52 @@ class ConvLayer:
             # store batch-wise gradients
             self.dinputs.append(dinput)
 
+        #
         self.dinputs = np.array(self.dinputs)
 
 
-# Sigmoid Activation
-class Sigmoid:
+# Rectified Linear Unit activation function
+class ReLU:
     # calculate predictions for model outputs
     def predict(self, outputs):
-        return (outputs > 0.5) * 1
+        return outputs
 
-    def forward(self, inputs):
+    def forward(self, inputs, training=True):
         self.inputs = inputs
-
-        # Sigmoid activation
-        self.output = 1 / (1 + np.exp(-inputs))
+        self.output = np.maximum(0, inputs)
 
     def backward(self, dvalues):
-        # Partial derivative of the sigmoid activation function
-        # s' = s(1 - s)
-        self.dinputs = dvalues * (1 - self.output) * self.output
+        # copy the input gradient values and structure
+        self.dinputs = dvalues.copy()
+        # produce a zero gradient where input values were invalid
+        self.dinputs[self.inputs <= 0] = 0
+
+
+# SoftMax activation function
+class SoftMax:
+    # calculate predictions for model outputs
+    def predict(self, outputs):
+        return np.argmax(outputs, axis=1)
+
+    def forward(self, inputs, training=False):
+        self.inputs = inputs
+
+        # exponential function application and normalization by the maximum input
+        exponentials = np.exp(inputs - np.max(inputs, axis=1, keepdims=True))
+        # normalization per softmax methodology
+        self.output = exponentials/np.sum(exponentials, axis=1, keepdims=True)
+
+    def backward(self, dvalues):
+        # uninitialized array
+        self.dinputs = np.empty_like(dvalues)
+
+        for i, (out, dvalue) in enumerate(zip(self.output, dvalues)):
+            # flatten the output
+            out = out.reshape(-1, 1)
+            # calculate jacobian matrix
+            jacobian = np.diagflat(out) - np.dot(out, out.T)
+            # calculate sample-wise gradient and store
+            self.dinputs[i] = np.dot(jacobian, dvalue)
 
 
 # common Loss class
@@ -134,30 +156,34 @@ class Loss:
         return data_loss
 
 
-# Binary Cross-Entropy Loss
-class BinaryCE(Loss):
-    # class values are either 0 or 1
-    # thus, the incorrect class = 1 - correct class
+# Categorical Cross Entropy loss function
+class LossCCE(Loss):
+    # SoftMax processed data is passed as the input, y as the target
     def forward(self, inputs, targets):
+        samples = len(inputs)
+
+        # prevent /0 process death without impacting the mean
         clipped_inputs = np.clip(inputs, 1e-7, 1 - 1e-7)
 
-        # loss calculated on a single ouput is a vector of losses
-        # sample loss will be the mean of losses from a single sample
-        # sample loss = ((current output)**-1) * sum(loss)
-        sample_losses = -(targets * np.log(clipped_inputs) + (1 - targets)
-                          * np.log(1 - clipped_inputs))
+        # ensure processing of both scalar and one-hot encoded inputs
+        if len(targets.shape) == 1:
+            confidences = clipped_inputs[range(samples), targets]
+        elif len(targets.shape) == 2:
+            confidences = np.sum(clipped_inputs * targets, axis=1)
 
-        # return data loss
-        return np.mean(sample_losses)
+        # calculate and return CCE data loss
+        losses = -np.log(confidences)
+        return losses
 
     def backward(self, dvalues, targets):
-        # prevent /0 process death without impacting the mean
-        clipped_dvalues = np.clip(dvalues, 1e-7, 1 - 1e-7)
+        samples = len(dvalues)
+        labels = len(dvalues[0])
 
-        # calculate and normalize the gradient
-        self.dinputs = -(targets / clipped_dvalues -
-                         (1 - targets) / (1 - clipped_dvalues))
-        self.dinputs = self.dinputs / len(dvalues)
+        if len(targets.shape) == 1:
+            targets = np.eye(labels)[targets]
+
+        self.dinputs = -targets / dvalues
+        self.dinputs = self.dinputs/ samples
 
 
 # basic convolutional neural network optimizer
@@ -185,70 +211,144 @@ class OptimizerCNN:
     def post_update(self):
         self.iterations += 1
 
+
+# Adaptive Momentum Optimizer
+class OptimizerAdaM:
+
+    # initialize optimizer: genearlly LR @ 1e-3, decay @ 1e-4
+    # gradient momentum is maintained so learning rate must be truncated
+    def __init__(self, learning_rate=0.001, decay=0.0, epsilon = 1e-7, beta1=0.9, beta2=0.999):
+        self.lr = learning_rate
+        self.current_lr = learning_rate
+        self.decay = decay
+        self.epsilon = epsilon
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.iterations = 0
+
+    # learning rate decay
+    def pre_update(self):
+        if self.decay:
+            self.current_lr = self.lr / (1 + self.decay * self.iterations)
+
+    # update layer parameters using optimizer settings
+    def update(self, layer):
+
+        # if absent, create cache arrays within the layer
+        if not hasattr(layer, 'cache_w'):
+            layer.momentum_w = np.zeros_like(layer.weights)
+            layer.cache_w = np.zeros_like(layer.weights)
+            layer.momentum_b = np.zeros_like(layer.biases)
+            layer.cache_b = np.zeros_like(layer.biases)
+
+        # update momentums with current gradients
+        layer.momentum_w = self.beta1 * layer.momentum_w + (1 - self.beta1) \
+                         * layer.dweights
+        layer.momentum_b = self.beta1 * layer.momentum_b + (1 - self.beta1) \
+                         * layer.dbiases
+
+        # correct momentum, starting at 1
+        momentum_w_corrected = layer.momentum_w / \
+                               (1 - self.beta1 ** (self.iterations + 1))
+        momentum_b_corrected = layer.momentum_b / \
+                               (1 - self.beta1 ** (self.iterations + 1))
+
+        # update caches with squared current gradients
+        layer.cache_w = self.beta2 * layer.cache_w + (1 - self.beta2) \
+                        * layer.dweights ** 2
+        layer.cache_b = self.beta2 * layer.cache_b + (1 - self.beta2) \
+                        * layer.dbiases ** 2
+
+        # correct caches
+        cache_w_corrected = layer.cache_w / \
+                            (1 - self.beta2 ** (self.iterations + 1))
+        cache_b_corrected = layer.cache_b / \
+                            (1 - self.beta2 ** (self.iterations + 1))
+
+        # update weights and biases
+        layer.weights += -self.current_lr * momentum_w_corrected / \
+                         (np.sqrt(cache_w_corrected) + self.epsilon)
+        layer.biases += -self.current_lr * momentum_b_corrected / \
+                        (np.sqrt(cache_b_corrected) + self.epsilon)
+
+    def post_update(self):
+        self.iterations += 1
+
+
 # import data
-# X values correspond to a uint8 np.array of grayscale data
-# X.shape = (6000, 28, 28)
-# y values correspond to a uint8 np.array of digit labels (0-9)
-# y.shape = (6000,)
 (X, y), (X_valid, y_valid) = mnist.load_data()
 
 # truncate and normalize features
-X, y = X[:100], y[:100]
+X, y = X[:1000], y[:1000]
 
 X = X.reshape(len(X), 28, 28, 1)
 
 X = X.astype("float32") / 255
 
-print(X.shape, y.shape)
+# define kernel shape
+kernel = (3, 3, 1)
 
-# define primary convolutional layer/activation pair: single 3x3 kernel
-clayer = ConvLayer(shape_in=X.shape, shape_k=(3,3,1))
-s1 = Sigmoid()
+# define primary convolutional layer/activation pair: 3x3 kernel with 1 input channel
+clayer = ConvLayer(shape_in=X.shape, shape_k=kernel)
+reluCNN = ReLU()
 
 # define secondary layer/activation pair
-h_out, w_out, d_out = clayer.shape_out
-n_in, n_neurons = h_out*w_out*d_out, len(X)
-print(n_in)
-dlayer = DenseLayer(n_in, n_neurons)
-s2 = Sigmoid()
+dlayer = DenseLayer(clayer.H * clayer.W * clayer.D, len(X))
+reluD = ReLU()
 
-# binary loss
-bloss = BinaryCE()
+# define final layer/activation pair: 10 outputs in accordance with ground truth labels (1-10)
+flayer = DenseLayer(len(X), 10)
+softmax = SoftMax()
 
-# optimizer
-optimizer = OptimizerCNN(learning_rate=2, decay=0)
+# define loss
+cce = LossCCE()
 
+# set optimizers
+optimizerCNN = OptimizerCNN(learning_rate=1e-3, decay=2e-3)
+optimizerD = OptimizerAdaM(learning_rate=1e-3, decay=2e-3)
+
+# train the model
 for epoch in range(1001):
     # forward pass on first layer/activator pair
     clayer.forward(X)
-    s1.forward(clayer.output)
+    reluCNN.forward(clayer.output)
 
     # forward pass on second layer/activator pair
-    dlayer.forward(s1.output)
-    s2.forward(dlayer.output)
+    dlayer.forward(reluCNN.output)
+    reluD.forward(dlayer.output)
 
-    # calculate loss and accuracy: CURRENT VALUES INACCURATE
-    loss = bloss.calculate(s2.output, y)
+    # forward pass on final layer/activation pair
+    flayer.forward(reluD.output)
+    softmax.forward(flayer.output)
 
-    predictions = (s2.output > 0.5) * 1
+    # calculate loss
+    loss = cce.calculate(softmax.output, y)
+
+    # report strongest predictions and calculate accuracy
+    predictions = np.argmax(softmax.output, axis=1)
     accuracy = np.mean(predictions == y)
 
     # report model performance
     if not epoch % 10:
         print(f"epoch: {epoch}, " +
-              # f"predictions: {predictions[:10]}, " +
               f"accuracy: {accuracy:.3f}, " +
               f"loss: {loss:.3f}, " +
-              f"lr: {optimizer.current_lr}")
+              f"lr: {optimizerCNN.current_lr}")
 
     # backpropogate the model
-    bloss.backward(s2.output, y)
-    s2.backward(bloss.dinputs)
-    dlayer.backward(s2.dinputs)
-    s1.backward(dlayer.dinputs)
-    clayer.backward(X, s1.dinputs)
+    cce.backward(softmax.output, y)
+    softmax.backward(cce.dinputs)
+    flayer.backward(softmax.dinputs)
+    reluD.backward(flayer.dinputs)
+    dlayer.backward(reluD.dinputs)
+    reluCNN.backward(dlayer.dinputs)
+    clayer.backward(X, reluCNN.dinputs)
 
     # update layers
-    optimizer.pre_update()
-    optimizer.update(clayer)
-    optimizer.post_update()
+    optimizerCNN.pre_update()
+    optimizerD.pre_update()
+    optimizerCNN.update(clayer)
+    optimizerD.update(dlayer)
+    optimizerD.update(flayer)
+    optimizerCNN.post_update()
+    optimizerD.post_update()
