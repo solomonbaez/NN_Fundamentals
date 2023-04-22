@@ -21,7 +21,7 @@ X, X_valid = X.astype("float32") / 255, X_valid.astype("float32") / 255
 kernel = (3, 3, 1)
 
 # define primary convolutional layer/activation pair: 3x3 kernel with 1 input channel
-Conv1 = ConvLayer(shape_in=X.shape, shape_k=kernel)
+Conv1 = ConvLayer(inputs=X, shape_in=X.shape, shape_k=kernel)
 reluC = ReLU()
 
 # define secondary layer/activation pair
@@ -37,7 +37,7 @@ cce = LossCCE()
 cce_backward = SoftMaxCCE()
 
 # set optimizers
-optimizerC = OptimizerCNN(learning_rate=1e-3, decay=2e-3)
+optimizerC = CNNAdaM(learning_rate=5e-3, decay=5e-5)
 optimizerD = OptimizerAdaM(learning_rate=1e-3, decay=2e-3)
 
 
@@ -75,7 +75,7 @@ for epoch in range(1001):
     reluD.backward(Dense2.dinputs)
     Dense1.backward(reluD.dinputs)
     reluC.backward(Dense1.dinputs)
-    Conv1.backward(X, reluC.dinputs)
+    Conv1.backward(reluC.dinputs)
 
     # update layers
     optimizerC.pre_update()
